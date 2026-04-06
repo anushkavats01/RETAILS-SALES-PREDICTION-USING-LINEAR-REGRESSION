@@ -25,244 +25,78 @@
 
 ---
 
-## Overview
+Overview
+This project builds an end-to-end machine learning pipeline to forecast retail product demand (units sold) from store and product attributes. It covers data exploration, preprocessing, feature engineering, model training, evaluation, and a browser-based prediction UI powered by Gradio.
 
-**RetailForecast** predicts product-level demand across retail locations using historical sales data, seasonal trends, promotional calendars, and external signals (e.g., weather, holidays). The system generates weekly or daily reorder recommendations to help procurement teams act ahead of supply disruptions.
+Features
 
-**Business impact targets:**
-- Reduce stockout events by **~30%**
-- Decrease excess inventory holding costs by **~20%**
-- Cut manual forecasting effort from days to minutes
+Exploratory Data Analysis — distribution plots, regional/seasonal breakdowns, and a full correlation heatmap
+Feature Engineering — three derived signals: Demand_Supply_Gap, Price_Discount_Ratio, Price_vs_Competitor
+Controlled Noise Injection — Gaussian noise on Demand Forecast to produce a realistic R² range (0.60–0.80)
+Train / Validation / Test Split — 70 / 15 / 15 with StandardScaler fitted only on training data (no leakage)
+5-Fold Cross Validation — fold-by-fold R² scores to confirm generalisation
+Gradio Frontend — interactive sliders and dropdowns; returns predicted units sold plus derived insight metrics
+Persisted Artefacts — model, scaler, and feature list saved with joblib for reuse
 
----
 
-## Key Features
-
-- 📊 **Multi-model ensemble** — combines gradient boosting, SARIMA, and exponential smoothing
-- 🏪 **Store-SKU level granularity** — per-location predictions, not just aggregate demand
-- 📅 **Calendar-aware** — holiday effects, promotional lifts, and seasonal decomposition built-in
-- ⚡ **Fast batch inference** — forecasts thousands of SKUs in under 60 seconds
-- 📈 **Interactive dashboard** — Streamlit app for exploring predictions and confidence intervals
-- 🔄 **Retraining pipeline** — automated weekly model refresh with drift detection
-
----
-
-## Architecture
-
-```
-Raw Sales Data
-      │
-      ▼
-┌─────────────────────┐
-│   Data Ingestion    │  ← CSV / SQL / S3
-└────────┬────────────┘
-         │
-         ▼
-┌─────────────────────┐
-│  Feature Engineering│  ← Lag features, rolling stats,
-│                     │    calendar flags, price elasticity
-└────────┬────────────┘
-         │
-         ▼
-┌────────────────────────────────────────┐
-│           Model Layer                  │
-│  ┌──────────┐  ┌────────┐  ┌───────┐  │
-│  │  XGBoost │  │ SARIMA │  │  ETS  │  │
-│  └────┬─────┘  └───┬────┘  └───┬───┘  │
-│       └────────────┴───────────┘       │
-│              Ensemble Blend            │
-└────────────────────┬───────────────────┘
-                     │
-                     ▼
-          ┌──────────────────┐
-          │  Forecast Output │  ← 7/14/28-day horizon
-          │  + Reorder Signal│
-          └──────────────────┘
-```
-
----
-
-## Getting Started
-
-### Prerequisites
-
-- Python 3.10+
-- pip or conda
-
-### Installation
-
-```bash
-# Clone the repository
-git clone https://github.com/your-org/retail-forecast.git
-cd retail-forecast
-
-# Create a virtual environment
-python -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
-
-# Install dependencies
-pip install -r requirements.txt
-```
-
-### Environment Setup
-
-Copy the example environment file and configure your data sources:
-
-```bash
-cp .env.example .env
-```
-
-| Variable | Description | Example |
-|---|---|---|
-| `DATA_SOURCE` | Input data backend | `csv`, `postgres`, `s3` |
-| `DB_CONNECTION_STRING` | Database URI (if applicable) | `postgresql://user:pass@host/db` |
-| `S3_BUCKET` | S3 bucket name (if applicable) | `my-retail-data` |
-| `FORECAST_HORIZON` | Days to forecast ahead | `28` |
-| `RETRAIN_SCHEDULE` | Cron expression for retraining | `0 2 * * 1` |
-
----
-
-## Usage
-
-### 1. Prepare Your Data
-
-Your input data should follow this schema:
-
-```
-data/raw/sales.csv
-```
-
-| Column | Type | Description |
-|---|---|---|
-| `date` | `YYYY-MM-DD` | Transaction date |
-| `store_id` | string | Unique store identifier |
-| `sku_id` | string | Product SKU |
-| `units_sold` | int | Daily units sold |
-| `price` | float | Sale price |
-| `on_promotion` | bool | Promotional flag |
-
-### 2. Run the Full Pipeline
-
-```bash
-python pipeline/run.py --config configs/default.yaml
-```
-
-### 3. Generate Forecasts Only
-
-```bash
-python forecast.py \
-  --input data/processed/features.parquet \
-  --horizon 28 \
-  --output outputs/forecasts.csv
-```
-
-### 4. Launch the Dashboard
-
-```bash
-streamlit run app/dashboard.py
-```
-
-Then open [http://localhost:8501](http://localhost:8501) in your browser.
-
-### 5. Evaluate Model Performance
-
-```bash
-python evaluate.py --forecasts outputs/forecasts.csv --actuals data/actuals.csv
-```
-
----
-
-## Model Details
-
-### Feature Engineering
-
-| Feature Group | Examples |
-|---|---|
-| Lag features | `units_sold_lag_7`, `units_sold_lag_28` |
-| Rolling statistics | `rolling_mean_14`, `rolling_std_7` |
-| Calendar | `day_of_week`, `is_holiday`, `days_to_holiday` |
-| Promotional | `promo_flag`, `promo_depth`, `promo_duration` |
-| Price | `price`, `price_change_pct`, `elasticity_estimate` |
-
-### Ensemble Strategy
-
-The final forecast blends three base models using a learned ridge regression meta-model:
-
-- **XGBoost** — captures non-linear interactions and promotional effects
-- **SARIMA** — strong seasonal + trend decomposition for stable SKUs
-- **ETS (Exponential Smoothing)** — robust baseline for low-volume, noisy products
-
-Blend weights are retrained weekly and stored in `models/meta/`.
-
-### Evaluation Metrics
-
-| Metric | Description |
-|---|---|
-| **MAPE** | Mean Absolute Percentage Error |
-| **WMAPE** | Weighted MAPE (volume-weighted) |
-| **Bias** | Systematic over/under-forecasting |
-| **Fill Rate** | % of demand met without stockout |
-
----
-
-## Project Structure
-
-```
-retail-forecast/
-├── app/
-│   └── dashboard.py          # Streamlit forecast explorer
-├── configs/
-│   └── default.yaml          # Pipeline configuration
-├── data/
-│   ├── raw/                  # Source data (gitignored)
-│   └── processed/            # Feature-engineered datasets
-├── models/
-│   ├── base/                 # Serialized base models
-│   └── meta/                 # Ensemble blend weights
-├── notebooks/
-│   ├── 01_eda.ipynb          # Exploratory data analysis
-│   ├── 02_feature_eng.ipynb  # Feature development
-│   └── 03_model_eval.ipynb   # Performance benchmarking
-├── pipeline/
-│   ├── ingest.py             # Data ingestion
-│   ├── features.py           # Feature engineering
-│   ├── train.py              # Model training
-│   └── run.py                # End-to-end orchestration
-├── tests/
-│   ├── test_features.py
-│   └── test_models.py
-├── evaluate.py               # Standalone evaluation script
-├── forecast.py               # Standalone inference script
-├── requirements.txt
-├── .env.example
+Project Structure
+.
+├── retail_demand_forecast_v2.ipynb   # Main notebook (EDA → training → Gradio UI)
+├── retail_store_inventory.csv        # Source dataset (~73,100 rows)
+├── demand_forecast_model.pkl         # Saved Linear Regression model
+├── scaler.pkl                        # Saved StandardScaler
+├── features.pkl                      # Saved feature list
 └── README.md
-```
 
----
+Requirements
+python >= 3.8
+pandas
+numpy
+matplotlib
+seaborn
+scikit-learn
+joblib
+gradio
+Install all dependencies:
+bashpip install pandas numpy matplotlib seaborn scikit-learn joblib gradio
 
-## Results
+Quick Start
 
-Results on held-out test set (last 8 weeks of data, 500 SKUs across 12 stores):
+Clone the repo and add the dataset
 
-| Model | MAPE ↓ | WMAPE ↓ | Bias |
-|---|---|---|---|
-| Naive baseline | 31.4% | 28.7% | +4.2% |
-| SARIMA | 22.1% | 19.8% | -1.1% |
-| XGBoost | 17.6% | 15.3% | +0.4% |
-| **Ensemble (ours)** | **13.8%** | **11.9%** | **+0.1%** |
+bash   git clone https://github.com/<your-username>/retail-demand-forecast.git
+   cd retail-demand-forecast
+   # Place retail_store_inventory.csv in the project root
 
-*Tested on product categories: Apparel, Electronics, FMCG, Home Goods.*
+Run the notebook
+Open retail_demand_forecast_v2.ipynb in Jupyter and run all cells top-to-bottom. The final cell launches the Gradio app.
+Use the Gradio UI
+After the last cell executes, Gradio will print a local URL (e.g. http://127.0.0.1:7860). Open it in your browser, fill in the product/store details, and click Predict Demand.
 
----
 
-## Roadmap
+Dataset
+PropertyValueFileretail_store_inventory.csvRows~73,100TargetUnits SoldCategorical featuresCategory, Region, Weather Condition, SeasonalityNumeric featuresInventory Level, Units Ordered, Demand Forecast, Price, Discount, Competitor Pricing, Holiday/PromotionDate-derived featuresMonth, DayOfWeek, Quarter
 
-- [ ] Add deep learning baseline (N-BEATS / Temporal Fusion Transformer)
-- [ ] Supplier lead-time integration for reorder point optimization
-- [ ] Multi-echelon inventory support (DC → store)
-- [ ] REST API endpoint for real-time forecast serving
-- [ ] Automated anomaly detection on incoming sales data
+Pipeline Steps
+StepDescription1Import libraries2Load dataset3EDA — distributions, boxplots, correlation heatmap4Data cleaning & preprocessing (date parsing, null imputation, label encoding)5Controlled Gaussian noise on Demand Forecast6Feature engineering (3 derived features)7Train / validation / test split + StandardScaler8Linear Regression training, validation metrics9Test set evaluation + 5-fold cross validation10Result visualisations (actual vs predicted, residuals, coefficients, CV scores)11Save model artefacts with joblib12Gradio interactive frontend
 
+Model Performance
+MetricValueAlgorithmLinear RegressionEvaluationMAE, RMSE, R² on held-out test setCross Validation5-fold CV R² (mean ± std)Target R² range0.60 – 0.80
+
+Gradio UI Inputs & Outputs
+Inputs
+
+Product Category, Store Region, Season
+Inventory Level, Units Ordered, Demand Forecast
+Selling Price, Discount (%), Competitor Price
+Weather Condition, Holiday/Promotion flag
+Month, Day of Week, Quarter
+
+Outputs
+OutputDescriptionPredicted Units SoldPrimary demand forecastDemand-Supply GapDemand Forecast − Inventory LevelPrice vs CompetitorWhether price is higher or lower, and by how muchPrice Discount RatioPrice / (Discount + 1)
+
+Acknowledgements
+Built as the major project for the Intel Artificial Intelligence programme (VUIP111).
 ---
 
 ## Contributing
